@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+function run() {
+  VERSION=${VERSION:-"master"}
+  INSTALL_PATH=/var/lib
+  AV_PATH=$INSTALL_PATH/aviary/av
+  RELEASE_URL=${RELEASE_URL:-"https://github.com/ClemArt/aviary.sh/archive/${VERSION}.tar.gz"}
+  INVENTORY_GIT_URL=${INVENTORY_GIT_URL:-""}
+  CONFIG_FILE=${INSTALL_PATH}/aviary/config
+  CRONTAB_FILE=/etc/cron.d/aviary
+
+  echo "Installing from ${RELEASE_URL}"
+
+  # check for git dependency
+  if ! /usr/bin/which git > /dev/null; then
+    echo "Please install git and try again"
+    exit 1
+  fi
+
+  if [[ -z "$INVENTORY_GIT_URL" ]]; then
+    echo "Installing with no inventory git url; set later in $CONFIG_FILE"
+  fi
+
+  if [[ -e /var/lib/aviary/av ]]; then 
+    echo "Found existing installation at $AV_PATH; exiting"
+    exit 1
+  fi
+
+  echo Installing to ${INSTALL_PATH}...
+  mkdir -p ${INSTALL_PATH}/aviary
+  curl -sL $RELEASE_URL | tar --strip-components=1 -C ${INSTALL_PATH}/aviary -xz
+  ln -sf /var/lib/aviary/av /usr/bin/av
+  mkdir -p ${INSTALL_PATH}/aviary/inventory
+
+  if [[ ! -z "$INVENTORY_GIT_URL" ]]; then
+    echo "inventory_git_url=$INVENTORY_GIT_URL" >> $CONFIG_FILE
+  fi
+
+  echo Adding entry to ${CRONTAB_FILE}...
+  touch ${CRONTAB_FILE}
+  echo "$(cat ${CRONTAB_FILE} | grep -v $AV_PATH)" > ${CRONTAB_FILE}
+  echo "* * * * * root $AV_PATH directive >> /var/log/aviary-directive.log 2>&1" >> ${CRONTAB_FILE}
+  echo "$(( RANDOM % 60 )) * * * * root $AV_PATH apply >> /var/log/aviary.log 2>&1" >> ${CRONTAB_FILE}
+
+  echo Done
+}
+
+run  # Wrap in function to ensure entire script is downloaded.

@@ -57,6 +57,7 @@ Commands:
   list-hosts [filter]      List hosts with an optional filter (e.g. role=web)
   list-modules             List all available modules
   list-roles               List all available roles
+  check                    Check modules, roles and hosts configuration for issues
 
 Host actions:
   host <host> [host...]                Show attributes for the host(s)
@@ -150,6 +151,8 @@ done
 
 cd $aviary_root
 [[ ! -z "$local_inventory" ]] && inventory_dir=$local_inventory
+export aviary_root
+export inventory_dir
 [[ -z "$command" ]] && command=status
 
 function host_roles {
@@ -257,9 +260,7 @@ function host_remove_module {
   local host=$1
   local module=$2
   local modules_file=$inventory_dir/hosts/$host/modules
-  echo "$((grep -hs ^ $modules_file || true) | grep -v $module)" > $modules_file
-  #cp $modules_file /var/tmp/m1
-  #grep -v '^$' $modules_file || true > $modules_file
+  echo "$((grep -hs ^ $modules_file || true) | grep -Fx -v "$module")" > $modules_file
 }
 
 function host_add_module {
@@ -267,7 +268,7 @@ function host_add_module {
   local module=$2
   local modules_file=$inventory_dir/hosts/$host/modules
 
-  if [[ -z "$(ls $inventory_dir/modules | grep $module)" ]]; then
+  if [[ -z "$(ls -1 $inventory_dir/modules | grep -Fx "$module")" ]]; then
     log_error "couldn't find module $module"
     exit 1
   fi
@@ -281,7 +282,7 @@ function host_remove_role {
   local host=$1
   local role=$2
   local roles_file=$inventory_dir/hosts/$host/roles
-  echo "$(cat $roles_file | grep -v $subcommand_arg)" > $roles_file
+  echo "$((grep -hs ^ $roles_file || true) | grep -Fx -v "$role")" > $roles_file
 }
 
 function host_add_role {
@@ -289,13 +290,13 @@ function host_add_role {
   local role=$2
   local roles_file=$inventory_dir/hosts/$host/roles
 
-  if [[ -z "$(ls $inventory_dir/roles | grep $role)" ]]; then
-    log_error "Couldn't find module $role"
+  if [[ -z "$(ls -1 $inventory_dir/roles | grep -Fx "$role")" ]]; then
+    log_error "Couldn't find role $role"
     exit 1
   fi
 
   mkdir -p $inventory_dir/hosts/$host
-  host_remove_module $host $role
+  host_remove_role $host $role
   echo $role >> $roles_file
 }
 
@@ -348,12 +349,14 @@ case $command in
     # consult pause file
     if [[ -e $pause_file && ! $force ]]; then
       log_warn 'Bailing for pause lock file; try `av resume`'
-      exit 1 
+      trap - EXIT
+      exit 1
     fi
 
     # set up our lock file
     if [[ -e $lock_file && ! $force ]]; then
       log_error 'Bailing for run lock file; try `av recover`'
+      trap - EXIT
       exit 1
     else
       touch $lock_file

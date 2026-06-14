@@ -1,11 +1,10 @@
 <img alt="aviary.sh" src="aviary.svg" height=48>
 
 ***
-###
 
-Minimal distributed configuration management in bash.  Tiny alternative to ansible / chef / puppet / etc.  Made with :heart: by the friendly folks at https://frameableinc.com
+Minimal distributed configuration management in Bash. A tiny, lightweight alternative to Ansible, Chef, Puppet, and other heavy orchestration tools. Made with :heart: by the folks at https://frameableinc.com.
 
-```
+```bash
 $ sudo av apply
 Fetching inventory...
 Applying module nginx
@@ -13,34 +12,35 @@ Applying module memcached
 Done
 ```
 
-## How it works
+## How It Works
 
 <img src="diagram.png" width="100%">
 
-Aviary.sh follows some guiding principles:
+Aviary.sh follows three simple guiding principles:
+* **Bash is just fine** (it has been standard on servers for decades).
+* **Minimize abstraction layers** to keep configuration readable and simple.
+* **Each host is self-sufficient** (pull-based, no central orchestration pushes).
 
-- bash is just fine (yes, it is)
-- minimize levels of abstraction
-- each host takes care of itself
+Each node periodically pulls the latest version of the configuration repository (the **Inventory**) to discover its designated roles. Based on these roles, the node executes idempotent scripts to set up, test, or remove service modules.
 
-Each host periodically fetches the latest version of the inventory to see what roles should it be performing.  Given whatever roles, the inventory also describes modules (services, programs, etc) that need to be installed and running in order to fulfill the role, and the host configures itself accordingly.  The inventory is a git repo with a specific directory structure and idempotent scripts to apply modules.
+---
 
+## Getting Started
 
+### 1. Installation
 
-## Getting started
-
-#### Installation
-
-Install from the command line, on a box to be managed by aviary.sh:
+Install Aviary.sh directly from the command line on a machine to be managed:
 
 ```bash
 curl https://aviary.sh/install | sudo bash
 ```
 
+> [!NOTE]
+> Depending on the installer version used, this sets up the periodic cron schedule either in the system-wide `/etc/crontab` file or in a dedicated `/etc/cron.d/aviary` configuration file (strongly recommended).
 
-#### Inventory setup
+### 2. Inventory Setup
 
-Configure your inventory if you don't have one yet:
+Initialize your configuration repository (the inventory):
 
 ```bash
 mkdir inventory
@@ -52,30 +52,31 @@ git add .
 git commit -m "initial commit"
 ```
 
-Configure and push your repo to an origin:
+Configure and push your repository to a Git remote:
 
 ```bash
 git remote add origin $my_origin_url
 git push -u origin master
 ```
 
-Set your inventory url in config:
+Configure Aviary.sh to point to this repository in [config](file:///home/clement/Documents/PRIVATE/aviary.sh/config):
 
 ```bash
-echo inventory_git_url=$my_origin_url >> /var/lib/aviary/config
+echo "inventory_git_url=$my_origin_url" >> /var/lib/aviary/config
 ```
-Of course the dealings with git will be non-interactive, so you need to either set up ssh keys or access tokens in order to make that work.  In GitHub for example, find "Personal Access Tokens" under your account settings.  Once you have an access token, you can include it in the git url, e.g., `https://<username>:<access_token>@github.com/organization/aviary-inventory.git`
 
+> [!IMPORTANT]
+> Since Git operations run non-interactively, ensure that SSH deploy keys or Personal Access Tokens are configured. You can include credentials in the URL: `https://<username>:<access_token>@github.com/org/aviary-inventory.git`.
 
-#### Modules
+### 3. Adding Modules
 
-In the `inventory` directory we created above, add our first module:
+Create a directory for your first module (e.g., Message of the Day `motd`):
 
 ```bash
-mkdir modules/motd
+mkdir -p modules/motd
 ```
 
-Create an idempotent script to configure the message-of-the-day that users will see when they log in to this box.  In the inventory, create `modules/motd/apply` with these contents:
+Write an idempotent script `modules/motd/apply` to enforce the configuration state:
 
 ```bash
 # inventory/modules/motd/apply
@@ -85,20 +86,18 @@ cat <<EOF > /etc/motd
 EOF
 ```
 
-Now create this host in the inventory, and add the motd module to be applied:
+Assign this module directly to your host:
 
 ```bash
-mkdir hosts/$(hostname)
+mkdir -p hosts/$(hostname)
 echo motd > hosts/$(hostname)/modules
 ```
 
-It's usually better practice to apply roles (sets of modules) to hosts, but you can also apply ad-hoc modules directly if you like, as we're doing here.
+Commit these files to your Git repository and push them to origin.
 
-Now check in these contents and push them up to the inventory repo.
+### 4. Running `av`
 
-#### Running `av`
-
-To apply our module, run `av apply`.
+Apply the configuration state manually:
 
 ```bash
 # av apply
@@ -107,153 +106,111 @@ Applying motd...
 Done.
 ```
 
-Inspect `/etc/motd` to see that our motd module has in fact been applied.
-
-Running `av status` (or just `av`) tells us how the host is configured and what is its status:
+To see the host's current role and module configuration status:
 
 ```bash
 # av status
 STATUS OK
 ```
 
-#### Templates and variables
+---
 
-In order to make configuration files dynamic, we can use template files and variable interpolation.  Templates are {{ moustache }} style, and variables can be configured at various levels of the inventory directory hierarchy in `variables` bash files containing variable assignments.
+## Core Concepts
 
-Let's spruce up our `motd` module.  In the inventory, let's add a template in `modules/motd`:
+* **Inventory**: Git repository containing all configurations, roles, hosts, modules, and one-off directives.
+* **Host**: A managed machine identified by its hostname.
+* **Role**: A high-level description of a host's function (e.g., `web`, `database`), mapping to a list of modules.
+* **Module**: A package, service, or script ensuring specific system configurations. Can define `apply` (install), `test` (assert), and `drop` (uninstall) actions.
+* **Directive**: One-time shell script executed immediately when discovered (within a 24-hour window).
 
-```bash
-# inventory/modules/motd/motd.template
+---
 
+## Variables Resolution & Sourcing Order
+
+Aviary.sh resolves environment variables in a cascading, hierarchical order, allowing narrow scopes (like a host or module) to override broader ones (like global or role defaults).
+
+The resolution order is as follows:
+
+| Order | Scope | Path |
+| :--- | :--- | :--- |
+| **1** | Global | `$inventory_dir/variables` |
+| **2** | Role | `$inventory_dir/roles/<role>/variables` |
+| **3** | Host | `$inventory_dir/hosts/<host>/variables` |
+| **4** | Module | `$inventory_dir/modules/<module>/variables` |
+
+> [!TIP]
+> Variables can contain dynamic Bash assignments and shell expansion. They are automatically evaluated and exported when applying modules.
+
+### Example: Sprucing Up `motd` with Templates
+
+Add a template `modules/motd/motd.template`:
+```
 Welcome to {{ hostname }}
 
 "Ever make mistakes in life? Let’s make them birds. Yeah, they’re birds now."
 --Bob Ross
 ```
 
-Set the `hostname` variable in a `variables` file:
-
+Define a variable in `modules/motd/variables`:
 ```bash
-# inventory/modules/motd/variables
-
 hostname=$(hostname)
 ```
 
-Set the `apply` script to interpolate the template:
-
+Update `modules/motd/apply` to process the template:
 ```bash
-# inventory/modules/motd/apply
-
+# Source template engine and variables
 source template
 source variables
 
 template $(dirname $0)/motd.template > /etc/motd
 ```
 
-Looking at our inventory directory structure, we should see something like this:
+---
 
-```
-inventory
-├── hosts
-│   └── my-host-01
-│       └── modules
-├── modules
-│   └── motd
-│       ├── apply
-│       ├── motd.template
-│       └── variables
-├── roles
-└── directives
-```
+## Command Line Interface (`av`)
 
-From here, add more modules, group modules into roles, and apply roles to your hosts, similarly to how we did with this first module.
+### General Options
+* `--help`: Show the help message.
+* `--version`: Show CLI tool version.
+* `--log-level <level>`: Set output verbosity (`trace`, `debug`, `info`, `warn`, `critical`).
+* `--inventory <path>`: Run against a local inventory folder instead of pulling from Git.
+* `--no-fetch`: Run commands directly without fetching/updating the inventory first.
+* `--force`: Run even if a pause or run lock file is present.
+* `--quiet` / `-q`: Suppress log messages.
 
+### Commands
 
-## Concepts
+| Command | Description |
+| :--- | :--- |
+| `status` | Report the last run status (`OK`, `FAIL`, etc.) and system info (default). |
+| `apply` | Fetch inventory, evaluate changes, apply modules, and drop obsolete modules. |
+| `check` | Validate syntax and sanity of hosts, roles, and modules in the inventory. |
+| `fetch` | Pull the latest changes from the upstream Git inventory. |
+| `directive` | Scan and run outstanding one-off directives modified in the last 24 hours. |
+| `pause` | Prevent periodic cron-triggered `av apply` runs (creates a `.pause` lock file). |
+| `resume` | Allow periodic runs again (removes the `.pause` lock file). |
+| `recover` | Manually clear the run lock file (`.lock`) after an execution failure. |
+| `list-hosts [filter]` | List inventory hosts, optionally filtered by roles or variables (e.g., `role=web`). |
+| `list-modules` | List all available modules defined in the inventory. |
+| `list-roles` | List all available roles defined in the inventory. |
 
-**Inventory** - Git repository where you keep configuration about your servers and what-all they should be doing.  Consists of hosts, roles, and modules.
+### Host Manipulation Commands
+Manage roles and modules directly in the inventory:
+* `av host <host>`: Show attributes, roles, modules, and variables for the host.
+* `av host <host> add`: Register a new host in the inventory.
+* `av host <host> remove`: Remove a host from the inventory.
+* `av host <host> add-module <module>`: Assign a module directly to the host.
+* `av host <host> remove-module <module>`: Unassign a module from the host.
+* `av host <host> add-role <role>`: Assign a role to the host.
+* `av host <host> remove-role <role>`: Unassign a role from the host.
 
-**Host** - Server virtual or not with a hostname.
+---
 
-**Role** - High-level function that you define (e.g., "application server", or "database server") to be assumed by the host.  Multiple roles may be applied to a host.
+## Automated Execution (Cron)
 
-**Module** - Service or program (e.g., "node", or "postgres") required to fulfill a role.  A role will usually be comprised of many modules.
+To keep configurations continuously synchronized, two automated cron jobs are set up:
 
-**Directive** - One-time set of commands to be executed immediately.
+1. **Directives Engine** (`* * * * *`): Runs every minute to quickly pick up and run one-off tasks.
+2. **Apply Engine** (`X * * * *`): Runs once every hour at a randomized minute `X` (determined at installation to prevent all nodes from hammering the Git remote repository at the same time).
 
-## Inventory
-
-The inventory is the git repository where you keep configuration about your servers -- what roles they play, what services they run, etc.  
-
-There are four top-level directories: `hosts`, `roles`, `modules`, and `directives`.  Files in each directory are newline-delimited text files, unless specified otherwise
-
-### Hosts
-
-The hosts directory contains a directory for each host.  In each host directory live the files:
-  - `roles` - a list of roles to be fulfilled by the host
-  - `modules` - a list of ad-hoc modules to be applied on the host
-  - `variables` - list of bash variable assignments local to the host. These take priority over role variables
-
-### Roles
-
-The roles directory contains a directory for each role.  In each role directory live the files:
-  - `modules` - a list of modules required to fulfill the given role
-  - `variables` - list of bash variable assignments to be supplied when assuming a role. Host variables can overwrite these
-
-### Modules
-
-The modules directory contains a directory for each module.  In each module directory live the files:
-  - `apply` - idempotent bash script that will ensure the given service or program is installed and running
-  - `variables` - list of bash variable assignments local to the module
-  - `test` - bash script to assert that all looks well after we've run `apply`
-  - any other files (templates, configuration files, etc) necessary to support the `apply` script
-
-### Directives
-
-The directives directory contains bash scripts to be executed once on each host, immediately when they are discovered.  Only directive scripts with modification times within the most recent 24 hours will be considered for execution.
-
-
-## av
-
-The command line tool is called `av`.  
-
-```
-av - manage configuration for your hosts
-
-Usage:
-  av [options] [command] [command-args]
-
-Options:
-  --help                   Show this help message
-  --version                Show version
-  --log-level <level>      Set the log level (trace,debug,info,warn,critical) [default: info]
-  --force                  Run even if a pause or run lock is set
-  --no-fetch               Don't fetch the inventory
-
-Commands:
-  status                   Report the status of the last run of `apply` [default]
-  host <action>            Perform actions specific to the current host; more below
-  apply                    Apply roles and their associated modules on this host 
-  fetch                    Update local database by fetching from upstream
-  directive                Run any outstanding directives from the inventory
-  recover                  Reset run lock file after a failure
-  pause                    Set the pause lock to avoid periodic runs while debugging
-  resume                   Resume periodic runs after a pause
-
-Host actions:
-  host add                      Add the current host to the inventory
-  host add-module <module>      Add the module to this host in the inventory
-  host remove-module <module>   Remove the module from this host in the inventory
-  host add-role <role>          Add the role to this host in the inventory
-  host remove-role <role>       Remove the role from this host in the inventory
-  host diff                     See what has changed in the local inventory
-  host push                     Push local inventory changes up to the git origin
-```
-
-## Why Bash?
-
-For just about three decades, bash has been standard issue on the vast majority of computers serving traffic on the Internet.  Other languages have come and gone, each with their own story and arc, while bash has just been there.
-
-In addition to it consistently being there, it is good / good-enough at most everything we want to do while configuring a machine.  If we were using some other language half the time we'd end up shelling out anyway, so let's just stick in the shell to begin with and revel in the ease and consistency...
-
-But it's too _funky_ you say.  Well, yes, bash can have its quirks.  But we need some funk every now and then.  Let's just embrace it!
+For isolation and safety, it is highly recommended to configure these jobs inside `/etc/cron.d/aviary` rather than the system-wide `/etc/crontab`.

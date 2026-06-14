@@ -1,5 +1,5 @@
 # read global variables
-[[ -e $inventory_dir/variables ]] && source $inventory_dir/variables
+[[ -n ${inventory_dir-} && -e $inventory_dir/variables ]] && source $inventory_dir/variables
 
 # read caller variables from the module
 read -r _ caller_path <<< $(caller)
@@ -7,6 +7,7 @@ caller_variables=$(dirname $caller_path)/variables
 [ -e $caller_variables ] && source $caller_variables
 
 # read host variables
-machine_variables=inventory/hosts/$(hostname)/variables
+machine_variables=${inventory_dir:-inventory}/hosts/$(hostname)/variables
 [ -e $machine_variables ] && source $machine_variables
+
 
